@@ -1,0 +1,112 @@
+# NOYITO Optocoupler Modules to Arduino Nano Wiring
+
+## Module Layout:
+Each NOYITO module has 4 screw terminals:
+```
+[+] [-]    INPUT SIDE (120V AC from Thermador)
+[+] [-]    OUTPUT SIDE (5V DC to Arduino)
+```
+
+## Wiring for All 4 Modules:
+
+### Module 1 (Speed 1 - BLUE wire):
+```
+INPUT SIDE:
+[+] ← BLUE wire from Thermador
+[-] ← WHITE wire (Neutral) from Thermador
+
+OUTPUT SIDE:
+[+] ← Arduino 5V pin
+[-] ← Arduino Pin 3
+```
+
+### Module 2 (Speed 2 - GRAY wire):
+```
+INPUT SIDE:
+[+] ← GRAY wire from Thermador  
+[-] ← WHITE wire (Neutral) from Thermador
+
+OUTPUT SIDE:
+[+] ← Arduino 5V pin
+[-] ← Arduino Pin 4
+```
+
+### Module 3 (Speed 3 - ORANGE wire):
+```
+INPUT SIDE:
+[+] ← ORANGE wire from Thermador
+[-] ← WHITE wire (Neutral) from Thermador
+
+OUTPUT SIDE:
+[+] ← Arduino 5V pin  
+[-] ← Arduino Pin 5
+```
+
+### Module 4 (Speed 4 - BLACK wire):
+```
+INPUT SIDE:
+[+] ← BLACK wire from Thermador
+[-] ← WHITE wire (Neutral) from Thermador
+
+OUTPUT SIDE:
+[+] ← Arduino 5V pin
+[-] ← Arduino Pin 6
+```
+
+## Arduino Nano Pin Summary:
+```
+Arduino 5V   ← All 4 modules OUTPUT [+]
+Arduino Pin 3 ← Module 1 OUTPUT [-] (BLUE speed)
+Arduino Pin 4 ← Module 2 OUTPUT [-] (GRAY speed)  
+Arduino Pin 5 ← Module 3 OUTPUT [-] (ORANGE speed)
+Arduino Pin 6 ← Module 4 OUTPUT [-] (BLACK speed)
+Arduino GND   ← Common ground reference
+```
+
+## Shared Connections:
+- **Arduino 5V:** Connect to all 4 modules OUTPUT [+] terminals
+- **WHITE wire:** Connect to all 4 modules INPUT [-] terminals
+- **Arduino GND:** Connect to Cloudline A6 ground and power supply ground
+
+## Power Supply Connections:
+```
+12V Power Supply:
+[+12V] ← Arduino VIN + Cloudline A6 power
+[GND]  ← Arduino GND + Cloudline A6 ground + common reference
+```
+
+## Visual Layout:
+```
+THERMADOR WIRES    NOYITO MODULES    ARDUINO NANO
+                                    
+BLUE    ──┐        ┌─[+]            
+WHITE   ──┼────────┤ [-]  MODULE 1   ┌─ Pin 3
+          │        └─[+]─────────────┤ 5V
+          │          [-]             │
+GRAY    ──┤        ┌─[+]             │
+WHITE   ──┼────────┤ [-]  MODULE 2   ├─ Pin 4  
+          │        └─[+]─────────────┤ 5V
+          │          [-]             │
+ORANGE  ──┤        ┌─[+]             │
+WHITE   ──┼────────┤ [-]  MODULE 3   ├─ Pin 5
+          │        └─[+]─────────────┤ 5V  
+          │          [-]             │
+BLACK   ──┤        ┌─[+]             │
+WHITE   ──┴────────┤ [-]  MODULE 4   ├─ Pin 6
+                   └─[+]─────────────┴─ 5V
+                     [-]
+```
+
+## Wire Management Tips:
+1. **Use different colored wires** for each Arduino pin connection
+2. **Label each module** (Speed 1, 2, 3, 4) 
+3. **Bundle the 5V connections** using a small terminal block
+4. **Keep 120V and 5V wiring separated** physically
+5. **Use strain relief** on all wire connections
+
+## Testing Procedure:
+1. **Power off** - Make all connections with power OFF
+2. **Check continuity** - Verify all connections with multimeter  
+3. **Power on Arduino only** - Test 5V is present at module outputs
+4. **Power on Thermador** - Use `diag` command to verify pin states
+5. **Test each speed** - Press Thermador buttons, watch Arduino response

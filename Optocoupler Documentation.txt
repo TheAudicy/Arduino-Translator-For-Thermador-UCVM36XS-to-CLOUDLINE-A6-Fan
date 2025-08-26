@@ -1,0 +1,41 @@
+What You'd Need:
+Order 4 of these modules (one for each Thermador speed wire):
+
+Module 1: BLUE wire → Arduino Pin 3
+Module 2: GRAY wire → Arduino Pin 4
+Module 3: ORANGE wire → Arduino Pin 5
+Module 4: BLACK wire → Arduino Pin 6
+
+
+Simplified Wiring:
+Thermador Side (120V AC):
+BLUE wire   → Module 1 Input (+)
+WHITE wire  → Module 1 Input (-)
+GRAY wire   → Module 2 Input (+)  
+WHITE wire  → Module 2 Input (-)
+(etc. for all 4 modules)
+Arduino Side (5V DC):
+Module 1 Output (+) → Arduino 5V
+Module 1 Output (-) → Arduino Pin 3
+Module 2 Output (+) → Arduino 5V  
+Module 2 Output (-) → Arduino Pin 4
+(etc. for all 4 modules)
+
+## Safety Notes:
+- Always turn OFF power when making connections
+- Double-check all wiring before applying power
+- Use electrical tape to insulate all 120V connections
+- Keep 120V and 5V sides physically separated
+- Test with multimeter before connecting Arduino
+
+## Testing Procedure:
+1. **Without Arduino connected:**
+   - Apply 120V to Thermador wires
+   - Measure 0V or 5V on PC817 output side
+   - Should be 0V when Thermador speed OFF
+   - Should be ~5V when Thermador speed ON
+
+2. **With Arduino connected:**
+   - Use `diag` command to monitor pin states
+   - Press Thermador speed buttons
+   - Verify correct pins activate

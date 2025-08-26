@@ -1,0 +1,39 @@
+Power Supply Specifications:
+
+12V DC, 3A capacity (plenty of headroom)
+UL Listed for safety
+Compact wall adapter style
+Wire output terminals (not barrel connector)
+
+BEHIND WALL SETUP:
+┌─────────────────────────────────┐
+│ 120V AC Outlet (existing)      │
+│         ↓                       │
+│ 12V DC Wall Adapter             │
+│         ↓                       │
+│ Arduino Nano ← 12V DC           │
+│         ↓                       │
+│ NOYITO Modules                  │
+│         ↓                       │
+│ To Cloudline A6 ← PWM Signal    │
+└─────────────────────────────────┘
+
+12V Wall Adapter Output:
+[+12V] ──┬── Arduino VIN pin
+         └── Cloudline A6 +12V input
+
+[GND]  ──┬── Arduino GND pin  
+         ├── Cloudline A6 GND
+         └── NOYITO modules ground reference
+
+
+Look for something like:
+
+TRUEpower 12V 3A adapter (consumer grade)
+Ensure wire terminals instead of barrel connectors
+
+Code Compliance:
+
+Low voltage wiring (12V DC) has relaxed requirements
+120V connection must be in proper junction box
+May need electrician for 120V outlet installation
