@@ -1,353 +1,240 @@
 /*
- * Thermador UCVM36XS to Cloudline A6 Fan Speed Translator
- * 
- * This Arduino Nano acts as a translator between:
- * INPUT: Thermador UCVM36XS fan speed control signals
- * OUTPUT: PWM control for AC Infinity Cloudline A6 6-inch fan
- * 
- * The Arduino reads the fan speed signals from the Thermador control
- * and converts them to appropriate PWM signals for the Cloudline A6
+ * Thermador UCVM36XS to Cloudline A6 Fan Controller - Compact Version
+ * Optimized for Arduino Nano memory constraints
  */
 
-#include <Arduino.h>
-
 // Pin definitions
-#define CLOUDLINE_PWM_PIN 9      // PWM output to Cloudline A6
-#define CLOUDLINE_TACH_PIN 2     // Tachometer from Cloudline A6 (optional)
-#define STATUS_LED_PIN 13        // Status LED
+#define PWM_PIN 9
+#define TACH_PIN 2
+#define LED_PIN 13
+#define SPEED1_PIN 3  // BLUE wire
+#define SPEED2_PIN 4  // GRAY wire  
+#define SPEED3_PIN 5  // ORANGE wire
+#define SPEED4_PIN 6  // BLACK wire
 
-// Thermador input pins - adjust based on actual wiring
-#define THERMADOR_SPEED1_PIN 3   // Low speed signal from Thermador
-#define THERMADOR_SPEED2_PIN 4   // Medium speed signal from Thermador  
-#define THERMADOR_SPEED3_PIN 5   // High speed signal from Thermador
-#define THERMADOR_COMMON_PIN 6   // Common/ground from Thermador (if needed)
-
-// Alternative: Single analog input if Thermador uses variable voltage
-#define THERMADOR_ANALOG_PIN A0  // For variable voltage speed control
-
-// Fan speed settings for Cloudline A6
-#define FAN_OFF 0.0f
-#define FAN_LOW 0.3f      // 30% speed
-#define FAN_MEDIUM 0.6f   // 60% speed  
-#define FAN_HIGH 1.0f     // 100% speed
-
-// Control mode selection
-#define CONTROL_MODE_DIGITAL 1   // Thermador sends discrete on/off signals
-#define CONTROL_MODE_ANALOG 2    // Thermador sends variable voltage
-#define CONTROL_MODE CONTROL_MODE_DIGITAL  // Change this based on your setup
+// Fan speeds (0.0 to 1.0)
+const float FAN_SPEEDS[] = {0.0, 0.25, 0.50, 0.75, 1.0};
 
 // Global variables
-float currentFanSpeed = 0.0f;
-int currentSpeedLevel = 0;  // 0=off, 1=low, 2=medium, 3=high
-unsigned long lastSpeedChange = 0;
-volatile unsigned long tachPulseCount = 0;
-float currentRPM = 0;
-
-// Debouncing variables
-unsigned long lastDebounceTime = 0;
-unsigned long debounceDelay = 50;  // 50ms debounce
-int lastSpeedReading = 0;
+float currentSpeed = 0.0;
+int speedLevel = 0;
+unsigned long lastChange = 0;
+volatile unsigned long tachCount = 0;
+float rpm = 0;
+bool manualMode = false;
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Thermador UCVM36XS to Cloudline A6 Translator");
-  Serial.println("==============================================");
+  Serial.println(F("Thermador to Cloudline Translator"));
   
-  // Initialize output pins
-  pinMode(CLOUDLINE_PWM_PIN, OUTPUT);
-  pinMode(STATUS_LED_PIN, OUTPUT);
+  // Setup pins
+  pinMode(PWM_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(SPEED1_PIN, INPUT_PULLUP);
+  pinMode(SPEED2_PIN, INPUT_PULLUP);
+  pinMode(SPEED3_PIN, INPUT_PULLUP);
+  pinMode(SPEED4_PIN, INPUT_PULLUP);
+  pinMode(TACH_PIN, INPUT_PULLUP);
   
-  // Initialize input pins based on control mode
-  if (CONTROL_MODE == CONTROL_MODE_DIGITAL) {
-    pinMode(THERMADOR_SPEED1_PIN, INPUT_PULLUP);
-    pinMode(THERMADOR_SPEED2_PIN, INPUT_PULLUP);
-    pinMode(THERMADOR_SPEED3_PIN, INPUT_PULLUP);
-    Serial.println("Digital control mode - monitoring discrete speed inputs");
-  } else {
-    pinMode(THERMADOR_ANALOG_PIN, INPUT);
-    Serial.println("Analog control mode - monitoring variable voltage input");
-  }
+  // Setup PWM - 25kHz
+  TCCR1A = (1 << COM1A1) | (1 << WGM11);
+  TCCR1B = (1 << CS10) | (1 << WGM13);
+  ICR1 = 320;
+  OCR1A = 0;
   
-  // Setup tachometer (optional)
-  pinMode(CLOUDLINE_TACH_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(CLOUDLINE_TACH_PIN), tachISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(TACH_PIN), tachISR, FALLING);
   
-  // Setup PWM for Cloudline A6 control
-  setupCloudlinePWM();
-  
-  // Start with fan off
-  setCloudlineSpeed(FAN_OFF);
-  
-  Serial.println("Translator ready!");
-  Serial.println("Commands: 'off', 'low', 'medium', 'high', 'status', 'test'");
-  printConnectionDiagram();
+  setFanSpeed(0.0);
+  Serial.println(F("Ready!"));
 }
 
 void loop() {
   static unsigned long lastUpdate = 0;
-  static unsigned long lastStatusPrint = 0;
+  static unsigned long lastStatus = 0;
   
-  // Check Thermador inputs every 50ms
-  if (millis() - lastUpdate > 50) {
+  // Check inputs every 50ms (only if not in manual mode)
+  if (millis() - lastUpdate > 50 && !manualMode) {
     lastUpdate = millis();
     
-    int newSpeedLevel = readThermadorSpeed();
-    
-    // Only change speed if different and debounced
-    if (newSpeedLevel != currentSpeedLevel) {
-      if (millis() - lastSpeedChange > debounceDelay) {
-        currentSpeedLevel = newSpeedLevel;
-        updateCloudlineSpeed();
-        lastSpeedChange = millis();
-        
-        Serial.print("Speed changed to: ");
-        Serial.println(getSpeedName(currentSpeedLevel));
-      }
+    int newLevel = readSpeedLevel();
+    if (newLevel != speedLevel && millis() - lastChange > 100) {
+      speedLevel = newLevel;
+      setFanSpeed(FAN_SPEEDS[speedLevel]);
+      lastChange = millis();
+      
+      Serial.print(F("Speed: "));
+      Serial.println(getSpeedName());
     }
     
-    // Update RPM calculation
     updateRPM();
   }
   
-  // Print status every 5 seconds
-  if (millis() - lastStatusPrint > 5000) {
-    lastStatusPrint = millis();
+  // Status every 3 seconds
+  if (millis() - lastStatus > 3000) {
+    lastStatus = millis();
     printStatus();
   }
   
-  // Handle manual serial commands for testing
-  handleSerialCommands();
-  
-  // Update status LED (blink rate indicates speed level)
-  updateStatusLED();
+  handleCommands();
+  updateLED();
 }
 
-void setupCloudlinePWM() {
-  // Configure Timer 1 for 25kHz PWM - optimal for Cloudline A6
-  TCCR1A = (1 << COM1A1) | (1 << WGM11);
-  TCCR1B = (1 << CS10) | (1 << WGM13);
-  ICR1 = 320;  // 25kHz PWM frequency
-  OCR1A = 0;   // Start at 0% duty cycle
+int readSpeedLevel() {
+  if (!digitalRead(SPEED4_PIN)) return 4;  // BLACK - High
+  if (!digitalRead(SPEED3_PIN)) return 3;  // ORANGE - Med-High  
+  if (!digitalRead(SPEED2_PIN)) return 2;  // GRAY - Medium
+  if (!digitalRead(SPEED1_PIN)) return 1;  // BLUE - Low
+  return 0;  // Off
 }
 
-int readThermadorSpeed() {
-  if (CONTROL_MODE == CONTROL_MODE_DIGITAL) {
-    // Read discrete speed inputs
-    bool speed1 = !digitalRead(THERMADOR_SPEED1_PIN);  // Assuming active low
-    bool speed2 = !digitalRead(THERMADOR_SPEED2_PIN);
-    bool speed3 = !digitalRead(THERMADOR_SPEED3_PIN);
-    
-    // Determine speed level based on which inputs are active
-    if (speed3) return 3;       // High speed
-    else if (speed2) return 2;  // Medium speed  
-    else if (speed1) return 1;  // Low speed
-    else return 0;              // Off
-    
-  } else {
-    // Read analog voltage and map to speed levels
-    int analogValue = analogRead(THERMADOR_ANALOG_PIN);
-    
-    // Map analog reading to speed levels
-    // Adjust these thresholds based on your Thermador's output voltages
-    if (analogValue < 100) return 0;        // Off (0-0.5V)
-    else if (analogValue < 300) return 1;   // Low (0.5-1.5V)
-    else if (analogValue < 600) return 2;   // Medium (1.5-3V)
-    else return 3;                          // High (3V+)
-  }
-}
-
-void updateCloudlineSpeed() {
-  float targetSpeed;
-  
-  switch (currentSpeedLevel) {
-    case 0: targetSpeed = FAN_OFF; break;
-    case 1: targetSpeed = FAN_LOW; break;
-    case 2: targetSpeed = FAN_MEDIUM; break;
-    case 3: targetSpeed = FAN_HIGH; break;
-    default: targetSpeed = FAN_OFF; break;
-  }
-  
-  setCloudlineSpeed(targetSpeed);
-}
-
-void setCloudlineSpeed(float speed) {
-  // Clamp speed to valid range
-  speed = constrain(speed, 0.0f, 1.0f);
-  currentFanSpeed = speed;
+void setFanSpeed(float speed) {
+  speed = constrain(speed, 0.0, 1.0);
+  currentSpeed = speed;
   
   if (speed == 0) {
-    OCR1A = 0;  // Fan off
+    OCR1A = 0;
   } else {
-    // Cloudline A6 works well with 20-100% duty cycle
-    float minDuty = 0.20f;  // 20% minimum for reliable operation
-    float scaledSpeed = minDuty + speed * (1.0f - minDuty);
-    OCR1A = (uint16_t)(320 * scaledSpeed);
+    float scaled = 0.20 + speed * 0.80;  // 20-100% range
+    OCR1A = (uint16_t)(320 * scaled);
   }
 }
 
 void tachISR() {
-  tachPulseCount++;
+  tachCount++;
 }
 
 void updateRPM() {
-  static unsigned long lastRPMUpdate = 0;
-  static unsigned long lastPulseCount = 0;
+  static unsigned long lastRPMTime = 0;
+  static unsigned long lastCount = 0;
   
-  if (millis() - lastRPMUpdate >= 1000) {  // Calculate every second
-    unsigned long pulsesSinceLastUpdate = tachPulseCount - lastPulseCount;
-    currentRPM = (pulsesSinceLastUpdate * 60.0) / 2.0;  // 2 pulses per revolution
-    
-    lastPulseCount = tachPulseCount;
-    lastRPMUpdate = millis();
+  if (millis() - lastRPMTime >= 1000) {
+    unsigned long pulses = tachCount - lastCount;
+    rpm = (pulses * 60.0) / 2.0;  // 2 pulses per revolution
+    lastCount = tachCount;
+    lastRPMTime = millis();
   }
 }
 
-void updateStatusLED() {
-  // Blink pattern indicates current speed level
-  int blinkInterval;
-  switch (currentSpeedLevel) {
-    case 0: blinkInterval = 2000; break;  // Slow blink = off
-    case 1: blinkInterval = 1000; break;  // Medium blink = low
-    case 2: blinkInterval = 500; break;   // Fast blink = medium  
-    case 3: blinkInterval = 200; break;   // Very fast blink = high
-    default: blinkInterval = 2000; break;
+void updateLED() {
+  int interval = 2000;
+  switch (speedLevel) {
+    case 1: interval = 1000; break;
+    case 2: interval = 500; break;
+    case 3: interval = 250; break;
+    case 4: interval = 100; break;
   }
-  
-  digitalWrite(STATUS_LED_PIN, (millis() / blinkInterval) % 2);
+  digitalWrite(LED_PIN, (millis() / interval) % 2);
 }
 
-void handleSerialCommands() {
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    command.toLowerCase();
+void handleCommands() {
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    cmd.toLowerCase();
     
-    if (command == "off") {
-      currentSpeedLevel = 0;
-      updateCloudlineSpeed();
-      Serial.println("Manual: Fan OFF");
+    if (cmd == F("off")) {
+      speedLevel = 0;
+      setFanSpeed(FAN_SPEEDS[0]);
+      manualMode = true;
+      Serial.println(F("Manual: OFF"));
     }
-    else if (command == "low") {
-      currentSpeedLevel = 1;
-      updateCloudlineSpeed();
-      Serial.println("Manual: Fan LOW");
+    else if (cmd == F("low")) {
+      speedLevel = 1;
+      setFanSpeed(FAN_SPEEDS[1]);
+      manualMode = true;
+      Serial.println(F("Manual: LOW"));
     }
-    else if (command == "medium") {
-      currentSpeedLevel = 2;
-      updateCloudlineSpeed();
-      Serial.println("Manual: Fan MEDIUM");
+    else if (cmd == F("medium")) {
+      speedLevel = 2;
+      setFanSpeed(FAN_SPEEDS[2]);
+      manualMode = true;
+      Serial.println(F("Manual: MEDIUM"));
     }
-    else if (command == "high") {
-      currentSpeedLevel = 3;
-      updateCloudlineSpeed();
-      Serial.println("Manual: Fan HIGH");
+    else if (cmd == F("high")) {
+      speedLevel = 3;
+      setFanSpeed(FAN_SPEEDS[3]);
+      manualMode = true;
+      Serial.println(F("Manual: HIGH"));
     }
-    else if (command == "status") {
+    else if (cmd == F("max")) {
+      speedLevel = 4;
+      setFanSpeed(FAN_SPEEDS[4]);
+      manualMode = true;
+      Serial.println(F("Manual: MAX"));
+    }
+    else if (cmd == F("auto")) {
+      manualMode = false;
+      Serial.println(F("Auto mode ON"));
+    }
+    else if (cmd == F("status")) {
       printDetailedStatus();
     }
-    else if (command == "test") {
-      runSpeedTest();
+    else if (cmd == F("test")) {
+      runTest();
     }
-    else if (command == "help") {
+    else if (cmd == F("help")) {
       printHelp();
-    }
-    else {
-      Serial.println("Unknown command. Available: off, low, medium, high, status, test, help");
     }
   }
 }
 
 void printStatus() {
-  Serial.print("Thermador: " + getSpeedName(currentSpeedLevel));
-  Serial.print(" | Cloudline: " + String(currentFanSpeed * 100, 0) + "%");
-  Serial.print(" | RPM: " + String(currentRPM, 0));
-  Serial.println();
+  Serial.print(F("Level:"));
+  Serial.print(speedLevel);
+  Serial.print(F(" Speed:"));
+  Serial.print((int)(currentSpeed * 100));
+  Serial.print(F("% RPM:"));
+  Serial.println((int)rpm);
 }
 
 void printDetailedStatus() {
-  Serial.println("=== Fan Translator Status ===");
-  Serial.println("Thermador Speed: " + getSpeedName(currentSpeedLevel));
-  Serial.println("Cloudline Speed: " + String(currentFanSpeed * 100, 1) + "%");
-  Serial.println("Cloudline RPM: " + String(currentRPM, 0));
-  Serial.println("Uptime: " + String(millis() / 1000) + " seconds");
-  
-  if (CONTROL_MODE == CONTROL_MODE_DIGITAL) {
-    Serial.println("Input Pins - S1:" + String(!digitalRead(THERMADOR_SPEED1_PIN)) + 
-                   " S2:" + String(!digitalRead(THERMADOR_SPEED2_PIN)) + 
-                   " S3:" + String(!digitalRead(THERMADOR_SPEED3_PIN)));
-  } else {
-    Serial.println("Analog Input: " + String(analogRead(THERMADOR_ANALOG_PIN)) + " (0-1023)");
-  }
-  Serial.println("");
+  Serial.println(F("=== Status ==="));
+  Serial.print(F("Speed Level: "));
+  Serial.println(getSpeedName());
+  Serial.print(F("Fan Speed: "));
+  Serial.print((int)(currentSpeed * 100));
+  Serial.println(F("%"));
+  Serial.print(F("RPM: "));
+  Serial.println((int)rpm);
+  Serial.print(F("Inputs: B"));
+  Serial.print(!digitalRead(SPEED1_PIN));
+  Serial.print(F(" G"));
+  Serial.print(!digitalRead(SPEED2_PIN));
+  Serial.print(F(" O"));
+  Serial.print(!digitalRead(SPEED3_PIN));
+  Serial.print(F(" K"));
+  Serial.println(!digitalRead(SPEED4_PIN));
 }
 
-String getSpeedName(int level) {
-  switch (level) {
+const char* getSpeedName() {
+  switch (speedLevel) {
     case 0: return "OFF";
     case 1: return "LOW";
-    case 2: return "MEDIUM";
+    case 2: return "MEDIUM"; 
     case 3: return "HIGH";
+    case 4: return "MAX";
     default: return "UNKNOWN";
   }
 }
 
-void runSpeedTest() {
-  Serial.println("Running Cloudline A6 speed test...");
+void runTest() {
+  Serial.println(F("Testing fan speeds..."));
   
-  Serial.println("Testing OFF...");
-  setCloudlineSpeed(FAN_OFF);
-  delay(2000);
+  for (int i = 0; i <= 4; i++) {
+    Serial.print(F("Testing "));
+    Serial.println(getSpeedName());
+    setFanSpeed(FAN_SPEEDS[i]);
+    delay(2000);
+  }
   
-  Serial.println("Testing LOW (30%)...");
-  setCloudlineSpeed(FAN_LOW);
-  delay(3000);
-  
-  Serial.println("Testing MEDIUM (60%)...");
-  setCloudlineSpeed(FAN_MEDIUM);
-  delay(3000);
-  
-  Serial.println("Testing HIGH (100%)...");
-  setCloudlineSpeed(FAN_HIGH);
-  delay(3000);
-  
-  Serial.println("Returning to OFF...");
-  setCloudlineSpeed(FAN_OFF);
-  currentSpeedLevel = 0;
-  
-  Serial.println("Speed test complete!");
+  setFanSpeed(0);
+  speedLevel = 0;
+  Serial.println(F("Test complete"));
 }
 
 void printHelp() {
-  Serial.println("=== Available Commands ===");
-  Serial.println("off     - Turn fan off");
-  Serial.println("low     - Set low speed");
-  Serial.println("medium  - Set medium speed");
-  Serial.println("high    - Set high speed");
-  Serial.println("status  - Show detailed status");
-  Serial.println("test    - Run speed test sequence");
-  Serial.println("help    - Show this help");
-  Serial.println("");
-}
-
-void printConnectionDiagram() {
-  Serial.println("\n=== Connection Diagram ===");
-  Serial.println("THERMADOR UCVM36XS → ARDUINO NANO → CLOUDLINE A6");
-  Serial.println("");
-  Serial.println("Thermador Connections:");
-  if (CONTROL_MODE == CONTROL_MODE_DIGITAL) {
-    Serial.println("  Speed 1 signal → Pin 3");
-    Serial.println("  Speed 2 signal → Pin 4"); 
-    Serial.println("  Speed 3 signal → Pin 5");
-    Serial.println("  Common/Ground → Arduino GND");
-  } else {
-    Serial.println("  Variable speed signal → Pin A0");
-    Serial.println("  Ground → Arduino GND");
-  }
-  Serial.println("");
-  Serial.println("Cloudline A6 Connections:");
-  Serial.println("  PWM Control → Pin 9");
-  Serial.println("  Tachometer → Pin 2 (optional)");
-  Serial.println("  Power: 12V+ → Arduino VIN & Fan +12V");
-  Serial.println("  Ground → Arduino GND & Fan GND");
-  Serial.println("===============================\n");
+  Serial.println(F("Commands:"));
+  Serial.println(F("off/low/medium/high/max"));
+  Serial.println(F("auto - enable auto mode"));
+  Serial.println(F("status/test/help"));
 }
